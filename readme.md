@@ -2,6 +2,8 @@
 
 Parsing SEC Standardized Generalized Markup Language in C. See [secsgml](https://github.com/john-friedman/secsgml) for a python interface.
 
+Not tested at scale yet. Will test with datamule experimental branch later.
+
 ## Performance
 
 - Parses samples/10k.txt in 4 ms. Extrapolates to 3GBps throughput on a single thread
