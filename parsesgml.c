@@ -5,32 +5,17 @@
 #include <errno.h>
 
 #include "secsgml.h"
+#include "standardize_submission_metadata.h"
 
 #ifdef _WIN32
-#include <windows.h>
 #include <direct.h>
-static double now_ms(void) {
-    static LARGE_INTEGER freq = {0};
-    LARGE_INTEGER counter;
-    if (freq.QuadPart == 0) {
-        QueryPerformanceFrequency(&freq);
-    }
-    QueryPerformanceCounter(&counter);
-    return (double)counter.QuadPart * 1000.0 / (double)freq.QuadPart;
-}
 static int make_dir(const char *path) {
     if (_mkdir(path) == 0) return 0;
     if (errno == EEXIST) return 0;
     return -1;
 }
 #else
-#include <time.h>
 #include <sys/stat.h>
-static double now_ms(void) {
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (double)ts.tv_sec * 1000.0 + (double)ts.tv_nsec / 1000000.0;
-}
 static int make_dir(const char *path) {
     if (mkdir(path, 0755) == 0) return 0;
     if (errno == EEXIST) return 0;
@@ -51,6 +36,27 @@ static uint8_t *load_file(const char *path, size_t *out_len) {
     if (out_len) *out_len = len;
     return buf;
 }
+
+// Timing
+#ifdef _WIN32
+#include <windows.h>
+static double now_ms(void) {
+    static LARGE_INTEGER freq = {0};
+    LARGE_INTEGER counter;
+    if (freq.QuadPart == 0) {
+        QueryPerformanceFrequency(&freq);
+    }
+    QueryPerformanceCounter(&counter);
+    return (double)counter.QuadPart * 1000.0 / (double)freq.QuadPart;
+}
+#else
+#include <time.h>
+static double now_ms(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (double)ts.tv_sec * 1000.0 + (double)ts.tv_nsec / 1000000.0;
+}
+#endif
 
 static void write_span(FILE *f, byte_span s) {
     if (s.ptr && s.len > 0) {
@@ -235,7 +241,7 @@ static void sanitize_filename(char *dst, size_t dst_cap, byte_span name, size_t 
     snprintf(dst, dst_cap, "doc_%zu.bin", index);
 }
 
-static int write_outputs(const char *out_dir, const sgml_parse_result *r, const submission_metadata *m) {
+static int write_outputs(const char *out_dir, const sgml_parse_result *r, const standardized_submission_metadata *m) {
     if (make_dir(out_dir) != 0) {
         fprintf(stderr, "Failed to create output dir: %s\n", out_dir);
         return -1;
@@ -309,8 +315,8 @@ int main(int argc, char **argv) {
     const char *input_path = argv[1];
     const char *output_dir = argv[2];
 
-    double t0 = now_ms();
     size_t in_len = 0;
+    double t0 = now_ms();
     uint8_t *buf = load_file(input_path, &in_len);
     double t1 = now_ms();
     if (!buf) {
@@ -321,26 +327,25 @@ int main(int argc, char **argv) {
     sgml_parse_stats stats = {0};
     double t2 = now_ms();
     submission_metadata sub = parse_submission_metadata(buf, in_len);
-    sgml_parse_result r = parse_sgml(buf, in_len, &stats);
     double t3 = now_ms();
-
+    standardized_submission_metadata std = standardize_submission_metadata(&sub);
     double t4 = now_ms();
-    int w = write_outputs(output_dir, &r, &sub);
+    sgml_parse_result r = parse_sgml(buf, in_len, &stats);
     double t5 = now_ms();
 
-    printf("Load:        %.3f ms\n", (t1 - t0));
-    printf("Parse total: %.3f ms\n", stats.total_ms);
-    printf("  Scan:      %.3f ms\n", stats.scan_ms);
-    printf("  Meta:      %.3f ms\n", stats.meta_ms);
-    printf("  UU detect: %.3f ms\n", stats.uu_detect_ms);
-    printf("  Uudecode:  %.3f ms\n", stats.decode_ms);
-    printf("Write:       %.3f ms\n", (t5 - t4));
-    printf("Documents:   %zu\n", r.doc_count);
-    printf("UUencoded:   %zu\n", stats.uuencoded_count);
+    int w = write_outputs(output_dir, &r, &std);
 
     free_sgml_parse_result(&r);
+    free_standardized_submission_metadata(&std);
     free_submission_metadata(&sub);
     free(buf);
+
+    fprintf(stderr, "Timing (ms):\n");
+    fprintf(stderr, "  load:              %.3f\n", (t1 - t0));
+    fprintf(stderr, "  parse_sub_metadata: %.3f\n", (t3 - t2));
+    fprintf(stderr, "  standardize_meta:  %.3f\n", (t4 - t3));
+    fprintf(stderr, "  parse_sgml:        %.3f\n", (t5 - t4));
+    fprintf(stderr, "  parse_total:       %.3f\n", (t5 - t2));
 
     return w == 0 ? 0 : 1;
 }

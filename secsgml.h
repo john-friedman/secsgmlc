@@ -51,17 +51,7 @@ typedef struct {
     size_t    doc_cap;
 } sgml_parse_result;
 
-// ---------------------------------------------------------------------------
-// Stats -- granular timing breakdown
-// ---------------------------------------------------------------------------
 typedef struct {
-    // Phase timings
-    double scan_ms;         // finding <DOCUMENT>/<TEXT> boundaries
-    double meta_ms;         // extracting TYPE/SEQUENCE/FILENAME/DESCRIPTION
-    double uu_detect_ms;    // find_uu_bounds across all documents
-    double decode_ms;       // uudecode across all documents
-    double total_ms;        // full parse_sgml wall time
-
     // Counts
     size_t doc_count;
     size_t uuencoded_count;

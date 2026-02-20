@@ -7,24 +7,6 @@
 #include "secsgml.h"
 #include "uudecode.h"
 
-#ifdef _WIN32
-#include <windows.h>
-static double now_ms(void) {
-    static LARGE_INTEGER freq = {0};
-    LARGE_INTEGER counter;
-    if (freq.QuadPart == 0) QueryPerformanceFrequency(&freq);
-    QueryPerformanceCounter(&counter);
-    return (double)counter.QuadPart * 1000.0 / (double)freq.QuadPart;
-}
-#else
-#include <time.h>
-static double now_ms(void) {
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (double)ts.tv_sec * 1000.0 + (double)ts.tv_nsec / 1000000.0;
-}
-#endif
-
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
@@ -214,10 +196,6 @@ sgml_parse_result parse_sgml(const uint8_t *buf, size_t len, sgml_parse_stats *s
     const uint8_t *p   = buf;
     const uint8_t *end = buf + len;
 
-    double t_total_start = now_ms();
-    double t_uu_accum    = 0.0;
-    double t_dec_accum   = 0.0;
-
     scan_state state = STATE_BETWEEN;
     document   cur   = {0};          // document being built
 
@@ -293,10 +271,8 @@ sgml_parse_result parse_sgml(const uint8_t *buf, size_t len, sgml_parse_stats *s
                 if (state == STATE_IN_TEXT) {
                     const uint8_t *text_end_ptr = lt;
 
-                    double t_uu0 = now_ms();
                     const uint8_t *enc_start, *enc_end;
                     int is_uu = find_uu_bounds(cur.content_start, text_end_ptr, &enc_start, &enc_end);
-                    t_uu_accum += now_ms() - t_uu0;
 
                     if (is_uu) {
                         cur.is_uuencoded  = 1;
@@ -304,9 +280,7 @@ sgml_parse_result parse_sgml(const uint8_t *buf, size_t len, sgml_parse_stats *s
                         cur.content_len   = (size_t)(enc_end - enc_start);
                         cur.decoded = (uint8_t *)malloc(cur.content_len ? cur.content_len : 1);
                         if (cur.decoded) {
-                            double t_dec0 = now_ms();
                             cur.decoded_len = uudecode(enc_start, cur.content_len, cur.decoded);
-                            t_dec_accum += now_ms() - t_dec0;
                         }
                         if (stats) stats->uuencoded_count++;
                     } else {
@@ -364,14 +338,6 @@ sgml_parse_result parse_sgml(const uint8_t *buf, size_t len, sgml_parse_stats *s
             // Not a tag we care about, skip past this '<'
             p = lt + 1;
         }
-    }
-
-    if (stats) {
-        stats->scan_ms      = 0.0; // folded into total
-        stats->uu_detect_ms = t_uu_accum;
-        stats->decode_ms    = t_dec_accum;
-        stats->meta_ms      = 0.0;
-        stats->total_ms     = now_ms() - t_total_start;
     }
 
     return result;

@@ -1,29 +1,14 @@
+so we at 4ms to parse 15mb file. thread safe so yeah. 5ms ish to read
 gcc -O3 -march=native -o parsesgml parsesgml.c secsgml.c uudecode.c
-./parsesgml 10k.txt output/  
-# PowerShell timing
-Measure-Command { ./uudecode input.txt output.jpg --mode load }
-Measure-Command { ./uudecode input.txt output.jpg --mode decode }
-Measure-Command { ./uudecode input.txt output.jpg --mode decode+write }
 
 
-decode is in ms, so ignore for now.
-# benchmarks
-load - 560ms - Measure-Command { 1..100 | ForEach-Object { ./uudecode input.txt output.jpg --mode load } }
-decode - 560ms - Measure-Command { 1..100 | ForEach-Object { ./uudecode input.txt output.jpg --mode decode } }
-write - 560ms - Measure-Command { 1..100 | ForEach-Object { ./uudecode input.txt output.jpg --mode decode+write } }
+# User
+- parse_sgml: parses the file and document metadata. takes bytews
+- parse_submission_metadata: parses the submission metadata. takes bytews
 
+probbaly ui names
+parse_sgml_documents_with_metadata
+parse_sgml_submission_metadata
+standardize_submission_metadata (implemented)
 
-for the parse sgml, we want
-- sub metadata (ignore for now)
-    - just do kv
-- document metadata (type, sequence, filename, description) or just do kv, just do kv man
-- documwnts
-
-gcc -O2 -o parsesgml parsesgml.c secsgml.c uudecode.c
-
-# other shit
-- for documents struct, can just count <DOCUMENT> to allocate memory i think.
-- optimization
-- secsgml size bytes
-- header standardization
-- filtering for only certain documents
+so now its just python shit

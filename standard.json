@@ -1,0 +1,45 @@
+{
+    "<sec-document>0001628280-26-003952.txt": "20260129",
+    "<sec-header>0001628280-26-003952.hdr.sgml": "20260129",
+    "acceptance-datetime": "20260128205503",
+    "accession-number": "0001628280-26-003952",
+    "type": "10-K",
+    "public-document-count": "119",
+    "period": "20251231",
+    "filing-date": "20260129",
+    "date-of-filing-date-change": "20260128",
+    "filer": {
+        "company-data": {
+            "conformed-name": "Tesla, Inc.",
+            "cik": "0001318605",
+            "assigned-sic": "3711",
+            "organization-name": "04 Manufacturing",
+            "ein": "912197729",
+            "state-of-incorporation": "TX",
+            "fiscal-year-end": "1231"
+        },
+        "filing-values": {
+            "form-type": "10-K",
+            "act": "34",
+            "file-number": "001-34756",
+            "film-number": "26574326"
+        },
+        "business-address": {
+            "street1": "1 TESLA ROAD",
+            "city": "AUSTIN",
+            "state": "TX",
+            "zip": "78725",
+            "phone": "512-516-8177"
+        },
+        "mail-address": {
+            "street1": "1 TESLA ROAD",
+            "city": "AUSTIN",
+            "state": "TX",
+            "zip": "78725"
+        },
+        "former-company": {
+            "former-conformed-name": "TESLA MOTORS INC",
+            "date-changed": "20050222"
+        }
+    }
+}
