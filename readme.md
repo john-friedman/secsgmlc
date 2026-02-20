@@ -1,14 +1,30 @@
-so we at 4ms to parse 15mb file. thread safe so yeah. 5ms ish to read
-gcc -O3 -march=native -o parsesgml parsesgml.c secsgml.c uudecode.c
+## SEC SGML C
 
+Parsing SEC Standardized Generalized Markup Language in C. See [secsgml](https://github.com/john-friedman/secsgml) for a python interface.
 
-# User
-- parse_sgml: parses the file and document metadata. takes bytews
-- parse_submission_metadata: parses the submission metadata. takes bytews
+## Performance
 
-probbaly ui names
-parse_sgml_documents_with_metadata
-parse_sgml_submission_metadata
-standardize_submission_metadata (implemented)
+- Parses samples/10k.txt in 4 ms. Extrapolates to 3GBps throughput on a single thread
+- I/O is the slow part.
 
-so now its just python shit
+## Functions
+
+- parse_sgml: parses the file and document metadata. takes bytes
+- parse_submission_metadata: parses the submission metadata. takes bytes
+- standardize_submission_metadata: standardizes the submission metadata
+- uudecode: decodes SEC uuencoding
+## Creating the executable
+
+```gcc -O3 -march=native -o parsesgml parsesgml.c secsgml.c uudecode.c standardize_submission_metadata.c```
+
+## SEC Specific Quirks
+
+SEC uuencoding has variable length lines. Needs special handling.
+
+Normal uudecode:
+
+![](uudecode_quirks/bad.jpg)
+
+Corrected for SEC uudecode:
+
+![](uudecode_quirks/good.jpg)
