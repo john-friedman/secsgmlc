@@ -4,11 +4,17 @@
 #include <stddef.h>
 #include <stdint.h>
 
+// ---------------------------------------------------------------------------
+// Core span type -- a view into an existing buffer, no ownership
+// ---------------------------------------------------------------------------
 typedef struct {
     const uint8_t *ptr;
     size_t len;
 } byte_span;
 
+// ---------------------------------------------------------------------------
+// Document metadata -- all spans point into the original buffer
+// ---------------------------------------------------------------------------
 typedef struct {
     byte_span type;
     byte_span sequence;
@@ -16,25 +22,58 @@ typedef struct {
     byte_span description;
 } document_meta;
 
+// ---------------------------------------------------------------------------
+// Document -- pointers into original buffer + optional decoded output
+// ---------------------------------------------------------------------------
 typedef struct {
     document_meta meta;
-    byte_span content;
-    uint8_t *owned_content;
+
+    // Raw encoded content span (points into original buffer)
+    // For uuencoded: points to first encoded line (after "begin 644 ...")
+    // For plain: points to the text content
+    const uint8_t *content_start;
+    size_t         content_len;
+
+    // If uuencoded: malloc'd decoded output, caller must free
+    // If not uuencoded: NULL, use content_start/content_len directly
+    uint8_t *decoded;
+    size_t   decoded_len;
+
+    int is_uuencoded;
 } document;
 
+// ---------------------------------------------------------------------------
+// Parse result -- owns the docs array, each doc may own decoded buffer
+// ---------------------------------------------------------------------------
 typedef struct {
     document *docs;
-    size_t doc_count;
+    size_t    doc_count;
+    size_t    doc_cap;
 } sgml_parse_result;
 
+// ---------------------------------------------------------------------------
+// Stats -- granular timing breakdown
+// ---------------------------------------------------------------------------
 typedef struct {
-    double decode_ms;
+    // Phase timings
+    double scan_ms;         // finding <DOCUMENT>/<TEXT> boundaries
+    double meta_ms;         // extracting TYPE/SEQUENCE/FILENAME/DESCRIPTION
+    double uu_detect_ms;    // find_uu_bounds across all documents
+    double decode_ms;       // uudecode across all documents
+    double total_ms;        // full parse_sgml wall time
+
+    // Counts
+    size_t doc_count;
+    size_t uuencoded_count;
 } sgml_parse_stats;
 
+// ---------------------------------------------------------------------------
+// Submission metadata (before first <DOCUMENT>)
+// ---------------------------------------------------------------------------
 typedef enum {
     SUB_EVENT_SECTION_START = 1,
-    SUB_EVENT_SECTION_END = 2,
-    SUB_EVENT_KEYVAL = 3
+    SUB_EVENT_SECTION_END   = 2,
+    SUB_EVENT_KEYVAL        = 3
 } submission_event_type;
 
 typedef struct {
@@ -47,11 +86,15 @@ typedef struct {
 typedef struct {
     submission_event *events;
     size_t count;
+    size_t cap;
 } submission_metadata;
 
-sgml_parse_result parse_sgml(const uint8_t *buf, size_t len, sgml_parse_stats *stats);
-void free_sgml_parse_result(sgml_parse_result *r);
-submission_metadata parse_submission_metadata(const uint8_t *buf, size_t len);
-void free_submission_metadata(submission_metadata *m);
+// ---------------------------------------------------------------------------
+// API
+// ---------------------------------------------------------------------------
+sgml_parse_result    parse_sgml(const uint8_t *buf, size_t len, sgml_parse_stats *stats);
+void                 free_sgml_parse_result(sgml_parse_result *r);
+submission_metadata  parse_submission_metadata(const uint8_t *buf, size_t len);
+void                 free_submission_metadata(submission_metadata *m);
 
 #endif

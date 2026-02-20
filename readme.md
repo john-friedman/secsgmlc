@@ -1,5 +1,5 @@
-gcc -O2 -o uudecode uudecode.cgcc -O2 -o uudecode uudecode.c
-
+gcc -O3 -march=native -o parsesgml parsesgml.c secsgml.c uudecode.c
+./parsesgml 10k.txt output/  
 # PowerShell timing
 Measure-Command { ./uudecode input.txt output.jpg --mode load }
 Measure-Command { ./uudecode input.txt output.jpg --mode decode }

@@ -223,7 +223,8 @@ static void sanitize_filename(char *dst, size_t dst_cap, byte_span name, size_t 
     if (name.ptr && name.len > 0) {
         for (size_t i = 0; i < name.len && pos + 1 < dst_cap; i++) {
             unsigned char c = name.ptr[i];
-            if (c == '\\' || c == '/' || c == ':' || c == '*' || c == '?' || c == '"' || c == '<' || c == '>' || c == '|' ) {
+            if (c == '\\' || c == '/' || c == ':' || c == '*' || c == '?' ||
+                c == '"'  || c == '<' || c == '>' || c == '|') {
                 c = '_';
             }
             dst[pos++] = (char)c;
@@ -284,9 +285,14 @@ static int write_outputs(const char *out_dir, const sgml_parse_result *r, const 
             fprintf(stderr, "Failed to write document: %s\n", out_path);
             continue;
         }
-        if (doc->content.ptr && doc->content.len > 0) {
-            fwrite(doc->content.ptr, 1, doc->content.len, out);
+
+        // Use decoded buffer if uuencoded, otherwise write raw content
+        if (doc->is_uuencoded && doc->decoded && doc->decoded_len > 0) {
+            fwrite(doc->decoded, 1, doc->decoded_len, out);
+        } else if (!doc->is_uuencoded && doc->content_start && doc->content_len > 0) {
+            fwrite(doc->content_start, 1, doc->content_len, out);
         }
+
         fclose(out);
     }
 
@@ -322,11 +328,15 @@ int main(int argc, char **argv) {
     int w = write_outputs(output_dir, &r, &sub);
     double t5 = now_ms();
 
-    printf("Load: %.3f ms\n", (t1 - t0));
-    printf("Parse: %.3f ms\n", (t3 - t2));
-    printf("Uudecode: %.3f ms\n", stats.decode_ms);
-    printf("Write: %.3f ms\n", (t5 - t4));
-    printf("Documents: %zu\n", r.doc_count);
+    printf("Load:        %.3f ms\n", (t1 - t0));
+    printf("Parse total: %.3f ms\n", stats.total_ms);
+    printf("  Scan:      %.3f ms\n", stats.scan_ms);
+    printf("  Meta:      %.3f ms\n", stats.meta_ms);
+    printf("  UU detect: %.3f ms\n", stats.uu_detect_ms);
+    printf("  Uudecode:  %.3f ms\n", stats.decode_ms);
+    printf("Write:       %.3f ms\n", (t5 - t4));
+    printf("Documents:   %zu\n", r.doc_count);
+    printf("UUencoded:   %zu\n", stats.uuencoded_count);
 
     free_sgml_parse_result(&r);
     free_submission_metadata(&sub);
