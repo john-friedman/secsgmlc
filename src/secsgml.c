@@ -278,7 +278,7 @@ sgml_parse_result parse_sgml(const uint8_t *buf, size_t len, sgml_parse_stats *s
                         cur.is_uuencoded  = 1;
                         cur.content_start = enc_start;
                         cur.content_len   = (size_t)(enc_end - enc_start);
-                        cur.decoded = (uint8_t *)malloc(cur.content_len ? cur.content_len : 1);
+                        cur.decoded = (uint8_t *)malloc((cur.content_len ? cur.content_len : 1) + 64);
                         if (cur.decoded) {
                             cur.decoded_len = uudecode(enc_start, cur.content_len, cur.decoded);
                         }
