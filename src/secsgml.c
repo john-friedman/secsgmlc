@@ -407,7 +407,9 @@ static void parse_archive_metadata(submission_metadata *m, const uint8_t *buf, s
             if (gt) {
                 byte_span key   = trim_span((byte_span){ line.ptr + 1, (size_t)(gt - line.ptr - 1) });
                 byte_span value = trim_span((byte_span){ gt + 1, (size_t)(line.ptr + line.len - gt - 1) });
-                if (key.len > 0 && key.ptr[0] == '/') {
+                if (key.len == 10 && memcmp(key.ptr, "SUBMISSION", 10) == 0) {
+                    // Skip SUBMISSION wrapper to mirror legacy output.
+                } else if (key.len > 0 && key.ptr[0] == '/') {
                     if (depth > 0) depth--;
                     add_event(m, SUB_EVENT_SECTION_END, key, (byte_span){0}, depth);
                 } else if (value.len == 0) {
