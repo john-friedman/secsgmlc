@@ -17,7 +17,7 @@ Not tested at scale yet. Will test with datamule experimental branch later.
 - uudecode: decodes SEC uuencoding
 ## Creating the executable
 
-```gcc -O3 -march=native -o parsesgml parsesgml.c secsgml.c uudecode.c standardize_submission_metadata.c```
+```gcc -O3 -march=native -o parsesgml.exe src/parsesgml.c src/secsgml.c src/uudecode.c src/standardize_submission_metadata.c```
 
 ## SEC Specific Quirks
 

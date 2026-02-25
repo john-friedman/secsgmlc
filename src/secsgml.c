@@ -149,6 +149,24 @@ static int find_uu_bounds(const uint8_t *text_start, const uint8_t *text_end,
     return 0;
 }
 
+// Pre-scan uuencoded payload to compute exact decoded size.
+// Uses the same length-char rules as uudecode, so malformed lines are still counted safely.
+static size_t uu_decoded_size(const uint8_t *enc_start, const uint8_t *enc_end) {
+    size_t total = 0;
+    const uint8_t *p = enc_start;
+    while (p < enc_end) {
+        const uint8_t *eol = find_eol(p, enc_end);
+        if (p < eol) {
+            uint8_t len_char = *p;
+            int nbytes = (len_char - 32) & 0x3f;
+            if (nbytes == 0) break;
+            total += (size_t)nbytes;
+        }
+        p = skip_eol(eol, enc_end);
+    }
+    return total;
+}
+
 static void strip_wrappers(const uint8_t **start, const uint8_t **end) {
     const uint8_t *s = *start;
     const uint8_t *e = *end;
@@ -198,7 +216,6 @@ sgml_parse_result parse_sgml(const uint8_t *buf, size_t len, sgml_parse_stats *s
 
     scan_state state = STATE_BETWEEN;
     document   cur   = {0};          // document being built
-
     while (p < end) {
 
         // Jump to next '<' -- memchr is SIMD-optimized on Linux/glibc
@@ -278,7 +295,8 @@ sgml_parse_result parse_sgml(const uint8_t *buf, size_t len, sgml_parse_stats *s
                         cur.is_uuencoded  = 1;
                         cur.content_start = enc_start;
                         cur.content_len   = (size_t)(enc_end - enc_start);
-                        cur.decoded = (uint8_t *)malloc((cur.content_len ? cur.content_len : 1) + 64);
+                        size_t dec_sz = uu_decoded_size(enc_start, enc_end);
+                        cur.decoded = (uint8_t *)malloc(dec_sz ? dec_sz : 1);
                         if (cur.decoded) {
                             cur.decoded_len = uudecode(enc_start, cur.content_len, cur.decoded);
                         }
@@ -338,6 +356,7 @@ sgml_parse_result parse_sgml(const uint8_t *buf, size_t len, sgml_parse_stats *s
             // Not a tag we care about, skip past this '<'
             p = lt + 1;
         }
+
     }
 
     return result;

@@ -323,7 +323,6 @@ int main(int argc, char **argv) {
         fprintf(stderr, "Failed to load input: %s\n", input_path);
         return 1;
     }
-
     sgml_parse_stats stats = {0};
     double t2 = now_ms();
     submission_metadata sub = parse_submission_metadata(buf, in_len);
@@ -332,7 +331,6 @@ int main(int argc, char **argv) {
     double t4 = now_ms();
     sgml_parse_result r = parse_sgml(buf, in_len, &stats);
     double t5 = now_ms();
-
     int w = write_outputs(output_dir, &r, &std);
 
     free_sgml_parse_result(&r);
