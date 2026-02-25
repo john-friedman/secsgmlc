@@ -1,2 +1,5 @@
 test_data/
 output/
+.vscode
+out/
+*.exe
