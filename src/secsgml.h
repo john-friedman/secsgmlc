@@ -45,10 +45,17 @@ typedef struct {
 // ---------------------------------------------------------------------------
 // Parse result -- owns the docs array, each doc may own decoded buffer
 // ---------------------------------------------------------------------------
+typedef enum {
+    SGML_STATUS_OK = 0,
+    SGML_STATUS_OOM = 1,
+    SGML_STATUS_TRUNCATED = 2
+} sgml_status;
+
 typedef struct {
     document *docs;
     size_t    doc_count;
     size_t    doc_cap;
+    sgml_status status;
 } sgml_parse_result;
 
 typedef struct {
@@ -77,6 +84,7 @@ typedef struct {
     submission_event *events;
     size_t count;
     size_t cap;
+    sgml_status status;
 } submission_metadata;
 
 // ---------------------------------------------------------------------------

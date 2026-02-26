@@ -14,6 +14,7 @@ typedef struct {
     uint8_t *arena;
     size_t arena_len;
     size_t arena_cap;
+    sgml_status status;
 } standardized_submission_metadata;
 
 // Returns a standardized copy of submission metadata. Does not mutate input.

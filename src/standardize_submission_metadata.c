@@ -203,6 +203,7 @@ static void free_lower_key(uint8_t *buf, uint8_t *stack_buf) {
 
 // Build fallback key: lowercase and replace runs of whitespace with '-'
 static uint8_t *build_fallback_key(const uint8_t *src, size_t len, size_t *out_len) {
+    if (!out_len) return NULL;
     if (!src || len == 0) { *out_len = 0; return NULL; }
     uint8_t *buf = (uint8_t *)malloc(len ? len : 1);
     if (!buf) { *out_len = 0; return NULL; }
@@ -230,9 +231,15 @@ static uint8_t *build_fallback_key(const uint8_t *src, size_t len, size_t *out_l
 standardized_submission_metadata standardize_submission_metadata(const submission_metadata *m) {
     standardized_submission_metadata out;
     memset(&out, 0, sizeof(out));
+    out.status = SGML_STATUS_OK;
     if (!m || m->count == 0) return out;
+    if (m->status != SGML_STATUS_OK) {
+        out.status = m->status;
+        return out;
+    }
 
     if (!events_ensure(&out, m->count)) {
+        out.status = SGML_STATUS_OOM;
         return out;
     }
 
@@ -270,9 +277,23 @@ standardized_submission_metadata standardize_submission_metadata(const submissio
                             memcpy(tmp + 1, me->to, out_len);
                             key_out = arena_append(&out, tmp, total);
                             free(tmp);
+                            if (key_out.ptr == NULL && key_out.len == 0) {
+                                out.status = SGML_STATUS_OOM;
+                                free_lower_key(lower, stack_buf);
+                                break;
+                            }
+                        } else {
+                            out.status = SGML_STATUS_OOM;
+                            free_lower_key(lower, stack_buf);
+                            break;
                         }
                     } else {
                         key_out = arena_append(&out, (const uint8_t *)me->to, out_len);
+                        if (key_out.ptr == NULL && key_out.len == 0) {
+                            out.status = SGML_STATUS_OOM;
+                            free_lower_key(lower, stack_buf);
+                            break;
+                        }
                     }
                 } else {
                     size_t fallback_len = 0;
@@ -286,9 +307,26 @@ standardized_submission_metadata standardize_submission_metadata(const submissio
                                 memcpy(tmp + 1, fallback, fallback_len);
                                 key_out = arena_append(&out, tmp, total);
                                 free(tmp);
+                                if (key_out.ptr == NULL && key_out.len == 0) {
+                                    out.status = SGML_STATUS_OOM;
+                                    free(fallback);
+                                    free_lower_key(lower, stack_buf);
+                                    break;
+                                }
+                            } else {
+                                out.status = SGML_STATUS_OOM;
+                                free(fallback);
+                                free_lower_key(lower, stack_buf);
+                                break;
                             }
                         } else {
                             key_out = arena_append(&out, fallback, fallback_len);
+                            if (key_out.ptr == NULL && key_out.len == 0) {
+                                out.status = SGML_STATUS_OOM;
+                                free(fallback);
+                                free_lower_key(lower, stack_buf);
+                                break;
+                            }
                         }
                         free(fallback);
                     }
@@ -297,6 +335,10 @@ standardized_submission_metadata standardize_submission_metadata(const submissio
             }
         } else if (key_in.len > 0 && key_in.ptr) {
             key_out = arena_append(&out, key_in.ptr, key_in.len);
+            if (key_out.ptr == NULL && key_out.len == 0) {
+                out.status = SGML_STATUS_OOM;
+                break;
+            }
         }
         new_ev.key = key_out;
 
@@ -327,6 +369,10 @@ standardized_submission_metadata standardize_submission_metadata(const submissio
                 val_out = arena_append(&out, extracted.ptr, extracted.len);
             } else {
                 val_out = arena_append(&out, val.ptr, val.len);
+            }
+            if (val_out.ptr == NULL && val_out.len == 0) {
+                out.status = SGML_STATUS_OOM;
+                break;
             }
         }
         new_ev.value = val_out;

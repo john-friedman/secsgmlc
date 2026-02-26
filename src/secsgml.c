@@ -22,6 +22,8 @@ static const char BEGIN_644[]  = "begin 644";
 #define TEXT_CLOSE_LEN (sizeof(TEXT_CLOSE) - 1)
 #define BEGIN_644_LEN  (sizeof(BEGIN_644)  - 1)
 
+#define UU_DECODE_MAX  (256u * 1024u * 1024u)
+
 // Tag suffixes after '<' (first char already consumed)
 // We dispatch on buf[1] after finding '<'
 #define SUFFIX_DOCUMENT    "DOCUMENT>"        // <DOCUMENT>
@@ -151,15 +153,21 @@ static int find_uu_bounds(const uint8_t *text_start, const uint8_t *text_end,
 
 // Pre-scan uuencoded payload to compute exact decoded size.
 // Uses the same length-char rules as uudecode, so malformed lines are still counted safely.
-static size_t uu_decoded_size(const uint8_t *enc_start, const uint8_t *enc_end) {
+static size_t uu_decoded_size(const uint8_t *enc_start, const uint8_t *enc_end, int *capped) {
     size_t total = 0;
     const uint8_t *p = enc_start;
+    if (capped) *capped = 0;
     while (p < enc_end) {
         const uint8_t *eol = find_eol(p, enc_end);
         if (p < eol) {
             uint8_t len_char = *p;
             int nbytes = (len_char - 32) & 0x3f;
             if (nbytes == 0) break;
+            if (total > UU_DECODE_MAX - (size_t)nbytes) {
+                total = UU_DECODE_MAX;
+                if (capped) *capped = 1;
+                break;
+            }
             total += (size_t)nbytes;
         }
         p = skip_eol(eol, enc_end);
@@ -208,8 +216,13 @@ typedef enum {
 // ---------------------------------------------------------------------------
 sgml_parse_result parse_sgml(const uint8_t *buf, size_t len, sgml_parse_stats *stats) {
     sgml_parse_result result = {0};
+    result.status = SGML_STATUS_OK;
     result.docs    = (document *)malloc(DOCS_INITIAL_CAP * sizeof(document));
     result.doc_cap = result.docs ? DOCS_INITIAL_CAP : 0;
+    if (!result.docs) {
+        result.status = SGML_STATUS_OOM;
+        return result;
+    }
 
     const uint8_t *p   = buf;
     const uint8_t *end = buf + len;
@@ -243,14 +256,14 @@ sgml_parse_result parse_sgml(const uint8_t *buf, size_t len, sgml_parse_stats *s
 
         if (c1 == 'D') {
             // Could be <DOCUMENT> or <DESCRIPTION>
-            if (remain > 9 && memcmp(lt+1, "DOCUMENT>", 9) == 0) {
+            if (remain >= 10 && memcmp(lt+1, "DOCUMENT>", 9) == 0) {
                 // <DOCUMENT>
                 if (state == STATE_BETWEEN) {
                     cur = (document){0};
                     state = STATE_IN_DOC_META;
                 }
                 p = lt + 10;
-            } else if (remain > 13 && memcmp(lt+1, "DESCRIPTION>", 12) == 0) {
+            } else if (remain >= 13 && memcmp(lt+1, "DESCRIPTION>", 12) == 0) {
                 // <DESCRIPTION>
                 if (state == STATE_IN_DOC_META) {
                     cur.meta.description = value_to_eol(lt + 13, end);
@@ -264,7 +277,7 @@ sgml_parse_result parse_sgml(const uint8_t *buf, size_t len, sgml_parse_stats *s
             if (remain < 3) { p = lt + 1; continue; }
             uint8_t c2 = lt[2];
 
-            if (c2 == 'D' && remain > 11 && memcmp(lt+1, "/DOCUMENT>", 10) == 0) {
+            if (c2 == 'D' && remain >= 11 && memcmp(lt+1, "/DOCUMENT>", 10) == 0) {
                 // </DOCUMENT>
                 if (state == STATE_IN_DOC_META || state == STATE_IN_TEXT) {
 
@@ -276,14 +289,18 @@ sgml_parse_result parse_sgml(const uint8_t *buf, size_t len, sgml_parse_stats *s
                     }
 
                     if (stats) stats->doc_count++;
-                    docs_push(&result, cur);
+                    if (!docs_push(&result, cur)) {
+                        if (cur.decoded) free(cur.decoded);
+                        result.status = SGML_STATUS_OOM;
+                        return result;
+                    }
                     cur   = (document){0};
                     state = STATE_BETWEEN;
                     p = lt + 11;
                     continue;
                 }
                 p = lt + 11;
-            } else if (c2 == 'T' && remain > 7 && memcmp(lt+1, "/TEXT>", 6) == 0) {
+            } else if (c2 == 'T' && remain >= 7 && memcmp(lt+1, "/TEXT>", 6) == 0) {
                 // </TEXT>
                 if (state == STATE_IN_TEXT) {
                     const uint8_t *text_end_ptr = lt;
@@ -295,10 +312,16 @@ sgml_parse_result parse_sgml(const uint8_t *buf, size_t len, sgml_parse_stats *s
                         cur.is_uuencoded  = 1;
                         cur.content_start = enc_start;
                         cur.content_len   = (size_t)(enc_end - enc_start);
-                        size_t dec_sz = uu_decoded_size(enc_start, enc_end);
+                        int capped = 0;
+                        size_t dec_sz = uu_decoded_size(enc_start, enc_end, &capped);
+                        if (capped) result.status = SGML_STATUS_TRUNCATED;
                         cur.decoded = (uint8_t *)malloc(dec_sz ? dec_sz : 1);
                         if (cur.decoded) {
-                            cur.decoded_len = uudecode(enc_start, cur.content_len, cur.decoded);
+                            cur.decoded_len = uudecode(enc_start, cur.content_len, cur.decoded, dec_sz);
+                            if (cur.decoded_len != dec_sz)
+                                result.status = SGML_STATUS_TRUNCATED;
+                        } else {
+                            result.status = SGML_STATUS_OOM;
                         }
                         if (stats) stats->uuencoded_count++;
                     } else {
@@ -321,14 +344,14 @@ sgml_parse_result parse_sgml(const uint8_t *buf, size_t len, sgml_parse_stats *s
 
         } else if (c1 == 'T') {
             // Could be <TEXT> or <TYPE>
-            if (remain > 6 && memcmp(lt+1, "TEXT>", 5) == 0) {
+            if (remain >= 6 && memcmp(lt+1, "TEXT>", 5) == 0) {
                 // <TEXT>
                 if (state == STATE_IN_DOC_META) {
                     cur.content_start = lt + 6; // points to byte after <TEXT>
                     state = STATE_IN_TEXT;
                 }
                 p = lt + 6;
-            } else if (remain > 6 && memcmp(lt+1, "TYPE>", 5) == 0) {
+            } else if (remain >= 6 && memcmp(lt+1, "TYPE>", 5) == 0) {
                 // <TYPE>
                 if (state == STATE_IN_DOC_META) {
                     cur.meta.type = value_to_eol(lt + 6, end);
@@ -338,14 +361,14 @@ sgml_parse_result parse_sgml(const uint8_t *buf, size_t len, sgml_parse_stats *s
                 p = lt + 1;
             }
 
-        } else if (c1 == 'S' && remain > 10 && memcmp(lt+1, "SEQUENCE>", 9) == 0) {
+        } else if (c1 == 'S' && remain >= 10 && memcmp(lt+1, "SEQUENCE>", 9) == 0) {
             // <SEQUENCE>
             if (state == STATE_IN_DOC_META) {
                 cur.meta.sequence = value_to_eol(lt + 10, end);
             }
             p = lt + 10;
 
-        } else if (c1 == 'F' && remain > 10 && memcmp(lt+1, "FILENAME>", 9) == 0) {
+        } else if (c1 == 'F' && remain >= 10 && memcmp(lt+1, "FILENAME>", 9) == 0) {
             // <FILENAME>
             if (state == STATE_IN_DOC_META) {
                 cur.meta.filename = value_to_eol(lt + 10, end);
@@ -393,7 +416,7 @@ static int add_event(submission_metadata *m, submission_event_type type,
     return 1;
 }
 
-static void parse_archive_metadata(submission_metadata *m, const uint8_t *buf, size_t len) {
+static int parse_archive_metadata(submission_metadata *m, const uint8_t *buf, size_t len) {
     const uint8_t *p   = buf;
     const uint8_t *end = buf + len;
     int depth = 0;
@@ -411,22 +434,23 @@ static void parse_archive_metadata(submission_metadata *m, const uint8_t *buf, s
                     // Skip SUBMISSION wrapper to mirror legacy output.
                 } else if (key.len > 0 && key.ptr[0] == '/') {
                     if (depth > 0) depth--;
-                    add_event(m, SUB_EVENT_SECTION_END, key, (byte_span){0}, depth);
+                    if (!add_event(m, SUB_EVENT_SECTION_END, key, (byte_span){0}, depth)) return 0;
                 } else if (value.len == 0) {
-                    add_event(m, SUB_EVENT_SECTION_START, key, (byte_span){0}, depth);
+                    if (!add_event(m, SUB_EVENT_SECTION_START, key, (byte_span){0}, depth)) return 0;
                     depth++;
                 } else {
-                    add_event(m, SUB_EVENT_KEYVAL, key, value, depth);
+                    if (!add_event(m, SUB_EVENT_KEYVAL, key, value, depth)) return 0;
                 }
             }
         }
         p = skip_eol(eol, end);
     }
     while (depth-- > 0)
-        add_event(m, SUB_EVENT_SECTION_END, (byte_span){0}, (byte_span){0}, depth);
+        if (!add_event(m, SUB_EVENT_SECTION_END, (byte_span){0}, (byte_span){0}, depth)) return 0;
+    return 1;
 }
 
-static void parse_tab_metadata(submission_metadata *m, const uint8_t *buf, size_t len) {
+static int parse_tab_metadata(submission_metadata *m, const uint8_t *buf, size_t len) {
     const uint8_t *p   = buf;
     const uint8_t *end = buf + len;
     int depth = 0;
@@ -443,7 +467,7 @@ static void parse_tab_metadata(submission_metadata *m, const uint8_t *buf, size_
 
         while (depth > (int)indent) {
             depth--;
-            add_event(m, SUB_EVENT_SECTION_END, (byte_span){0}, (byte_span){0}, depth);
+            if (!add_event(m, SUB_EVENT_SECTION_END, (byte_span){0}, (byte_span){0}, depth)) return 0;
         }
 
         const uint8_t *colon = (const uint8_t *)memchr(content.ptr, ':', content.len);
@@ -451,10 +475,10 @@ static void parse_tab_metadata(submission_metadata *m, const uint8_t *buf, size_
             byte_span key   = trim_span((byte_span){ content.ptr, (size_t)(colon - content.ptr) });
             byte_span value = trim_span((byte_span){ colon + 1, (size_t)(content.ptr + content.len - colon - 1) });
             if (value.len == 0) {
-                add_event(m, SUB_EVENT_SECTION_START, key, (byte_span){0}, depth);
+                if (!add_event(m, SUB_EVENT_SECTION_START, key, (byte_span){0}, depth)) return 0;
                 depth++;
             } else {
-                add_event(m, SUB_EVENT_KEYVAL, key, value, depth);
+                if (!add_event(m, SUB_EVENT_KEYVAL, key, value, depth)) return 0;
             }
         } else if (content.ptr[0] == '<') {
             const uint8_t *gt = (const uint8_t *)memchr(content.ptr, '>', content.len);
@@ -463,23 +487,25 @@ static void parse_tab_metadata(submission_metadata *m, const uint8_t *buf, size_
                 byte_span value = trim_span((byte_span){ gt + 1, (size_t)(content.ptr + content.len - gt - 1) });
                 if (key.len > 0 && key.ptr[0] == '/') {
                     if (depth > 0) depth--;
-                    add_event(m, SUB_EVENT_SECTION_END, key, (byte_span){0}, depth);
+                    if (!add_event(m, SUB_EVENT_SECTION_END, key, (byte_span){0}, depth)) return 0;
                 } else if (value.len == 0) {
-                    add_event(m, SUB_EVENT_SECTION_START, key, (byte_span){0}, depth);
+                    if (!add_event(m, SUB_EVENT_SECTION_START, key, (byte_span){0}, depth)) return 0;
                     depth++;
                 } else {
-                    add_event(m, SUB_EVENT_KEYVAL, key, value, depth);
+                    if (!add_event(m, SUB_EVENT_KEYVAL, key, value, depth)) return 0;
                 }
             }
         }
         p = skip_eol(eol, end);
     }
     while (depth-- > 0)
-        add_event(m, SUB_EVENT_SECTION_END, (byte_span){0}, (byte_span){0}, depth);
+        if (!add_event(m, SUB_EVENT_SECTION_END, (byte_span){0}, (byte_span){0}, depth)) return 0;
+    return 1;
 }
 
 submission_metadata parse_submission_metadata(const uint8_t *buf, size_t len) {
     submission_metadata m = {0};
+    m.status = SGML_STATUS_OK;
 
     const uint8_t *doc_start = find_subspan(buf, len, DOC_OPEN, DOC_OPEN_LEN);
     size_t sub_len = doc_start ? (size_t)(doc_start - buf) : len;
@@ -493,16 +519,28 @@ submission_metadata parse_submission_metadata(const uint8_t *buf, size_t len) {
         if (privacy_end > 0 && privacy_end < sub.len) {
             byte_span key   = { (const uint8_t *)"PRIVACY-ENHANCED-MESSAGE", 24 };
             byte_span value = { sub.ptr, privacy_end };
-            add_event(&m, SUB_EVENT_KEYVAL, key, value, 0);
+            if (!add_event(&m, SUB_EVENT_KEYVAL, key, value, 0)) {
+                m.status = SGML_STATUS_OOM;
+                return m;
+            }
             sub.ptr += privacy_end;
             sub.len -= privacy_end;
             sub = ltrim_span(sub);
         }
-        parse_tab_metadata(&m, sub.ptr, sub.len);
+        if (!parse_tab_metadata(&m, sub.ptr, sub.len)) {
+            m.status = SGML_STATUS_OOM;
+            return m;
+        }
     } else if (sub.len >= 3 && memcmp(sub.ptr, "<SE", 3) == 0) {
-        parse_tab_metadata(&m, sub.ptr, sub.len);
+        if (!parse_tab_metadata(&m, sub.ptr, sub.len)) {
+            m.status = SGML_STATUS_OOM;
+            return m;
+        }
     } else {
-        parse_archive_metadata(&m, sub.ptr, sub.len);
+        if (!parse_archive_metadata(&m, sub.ptr, sub.len)) {
+            m.status = SGML_STATUS_OOM;
+            return m;
+        }
     }
 
     return m;

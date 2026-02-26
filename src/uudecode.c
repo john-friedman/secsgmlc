@@ -206,7 +206,7 @@ static inline void decode_full_line(const uint8_t *in, uint8_t *out, size_t *out
 // Main decode loop
 // ---------------------------------------------------------------------------
 
-size_t uudecode(const uint8_t *in, size_t in_len, uint8_t *out)
+size_t uudecode(const uint8_t *in, size_t in_len, uint8_t *out, size_t out_cap)
 {
     size_t i = 0;
     size_t out_pos = 0;
@@ -243,8 +243,18 @@ size_t uudecode(const uint8_t *in, size_t in_len, uint8_t *out)
         if (i < in_len && buf[i] == '\n')
             i++;
 
+        int out_full = 0;
+        if (out_pos + (size_t)nbytes > out_cap)
+        {
+            nbytes = (int)(out_cap - out_pos);
+            out_full = 1;
+        }
+        if (nbytes <= 0)
+            return out_pos;
+
         // --- FAST PATH: full line, >= 60 encoded chars ---
-        if (len_char == 'M' && line_len >= 60 && (line_start + 64 <= end))
+        if (!out_full && len_char == 'M' && line_len >= 60 && (line_start + 64 <= end) &&
+            (out_pos + 45 <= out_cap))
         {
             decode_full_line(line_start, out, &out_pos);
             continue;
@@ -263,11 +273,16 @@ size_t uudecode(const uint8_t *in, size_t in_len, uint8_t *out)
             if (leftbits >= 8)
             {
                 leftbits -= 8;
+                if (out_pos >= out_cap)
+                    return out_pos;
                 out[out_pos++] = (leftchar >> leftbits) & 0xff;
                 leftchar &= (1 << leftbits) - 1;
                 remaining--;
             }
         }
+
+        if (out_full)
+            return out_pos;
     }
 
     return out_pos;
