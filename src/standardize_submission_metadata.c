@@ -21,13 +21,11 @@ static inline uint8_t to_lower_ascii(uint8_t c) {
 
 static int arena_ensure(standardized_submission_metadata *out, size_t extra) {
     if (out->arena_len + extra <= out->arena_cap) return 1;
-    size_t new_cap = out->arena_cap ? out->arena_cap * 2 : 1024;
-    while (new_cap < out->arena_len + extra) new_cap *= 2;
-    uint8_t *tmp = (uint8_t *)realloc(out->arena, new_cap);
-    if (!tmp) return 0;
-    out->arena = tmp;
-    out->arena_cap = new_cap;
-    return 1;
+    /* The arena is sized once, up front (standardize_submission_metadata), and
+     * arena_append() hands out pointers into it that are stored in events. Moving
+     * it here would dangle every span recorded so far, so fail instead; callers
+     * turn this into SGML_STATUS_OOM. */
+    return 0;
 }
 
 static byte_span arena_append(standardized_submission_metadata *out,
@@ -131,6 +129,16 @@ static const map_entry MAP[] = {
     { "new-series", "new-series", REGEX_NONE },
     { "relationship", "relationship", REGEX_NONE }
 };
+
+// Longest MAP[] target: upper bound for the length of a normalized key.
+static size_t map_max_out_len(void) {
+    size_t max = 0;
+    for (size_t i = 0; i < sizeof(MAP) / sizeof(MAP[0]); i++) {
+        size_t len = strlen(MAP[i].to);
+        if (len > max) max = len;
+    }
+    return max;
+}
 
 static const map_entry *lookup_map(const uint8_t *key, size_t len) {
     if (!key || len == 0) return NULL;
@@ -241,6 +249,33 @@ standardized_submission_metadata standardize_submission_metadata(const submissio
     if (!events_ensure(&out, m->count)) {
         out.status = SGML_STATUS_OOM;
         return out;
+    }
+
+    /* Allocate the string arena once, before any span exists, so that no append
+     * can ever need to grow (and therefore move) it: keys stay within
+     * max(key length, longest MAP target) plus one byte for the '/' prefix some
+     * paths add, values never grow, 9 spare bytes per event absorb the rest. If
+     * the estimate is ever short, arena_ensure() fails closed instead of
+     * relocating, so this cannot fall back into use-after-free. */
+    {
+        size_t max_out = map_max_out_len();
+        size_t need = 1024;
+        for (size_t i = 0; i < m->count; i++) {
+            size_t klen = m->events[i].key.len;
+            size_t vlen = m->events[i].value.len;
+            if (klen < max_out) klen = max_out;
+            if (need > SIZE_MAX - klen - vlen - 9) {
+                out.status = SGML_STATUS_OOM;
+                return out;
+            }
+            need += klen + vlen + 9;
+        }
+        out.arena = (uint8_t *)malloc(need);
+        if (!out.arena) {
+            out.status = SGML_STATUS_OOM;
+            return out;
+        }
+        out.arena_cap = need;
     }
 
     for (size_t i = 0; i < m->count; i++) {
